@@ -3,7 +3,8 @@
 
 library(foreign)
 # data <- read.dta("cox_katz_replication/data/subgroup-roll-call4606.dta")
-data <- read.dta("subgroup-roll-call4606.dta")
+load("data/ck_data.RData")
+data <- ck_data
 
 period <- with(data, congress - 45)
 

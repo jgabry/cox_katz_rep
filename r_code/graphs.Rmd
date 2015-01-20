@@ -1,0 +1,160 @@
+---
+output: pdf_document
+---
+  
+```{r, pkgs, echo=FALSE, message=FALSE}
+library(foreign)
+library(rstan)
+library(plyr)
+library(ggplot2)
+library(gridExtra)
+library(scales)
+```
+
+```{r, setup, echo=FALSE, message=FALSE}
+stan_dir <- "/Users/jgabry/Desktop/COLUMBIA/Stuff_for_Wawro/Rsync/cox_katz/stan_tests/"
+sfname <- "01_20_2015"
+load(paste0(stan_dir, sfname, "/", "ck_",sfname,".RData"))
+stanfit <- get(paste0("ck_", sfname))
+
+stata_dir <- "/Users/jgabry/Desktop/COLUMBIA/Stuff_for_Wawro/Rsync/cox_katz/cox_katz_replication"
+RCdat <-  read.dta(paste0(stata_dir,"/data/subgroup-roll-call4606.dta"))
+rollcall_data <- RCdat
+congress_data <- ddply(RCdat, "congress", summarise, majority = mean(demmaj))
+```
+
+```{r, functions, echo=FALSE, message=FALSE}
+# Define some functions 
+plot_bias <- function(posterior, data, cred_lev = 0.95, legend = TRUE) {  
+  prepare_plot_data <- function() {
+    Mean <- apply(posterior, 2, mean)
+    SD <- apply(posterior, 2, sd)
+    Majority <- factor(data$majority, labels = c("Republican", "Democrat"))
+    alpha <- 1 - (1 - cred_lev)/2
+    z <- qnorm(alpha)
+    out <- data.frame(Congress = data$congress, Majority, Bias = Mean, LB = Mean - z*SD, UB = Mean + z*SD)
+    return(out)
+  }
+  assemble_graph <- function(df) {
+    my_clrs <- scale_color_manual(values = c("red","blue"), name = "Majority Party")
+    period_lab <- "Period hypothesized\n by Cox & Katz\n to show bias\n toward majority"
+    my_lty <- scale_linetype_manual(values = 1, labels = period_lab, name = "")
+    my_guides <- guides(color = guide_legend(order = 1), linetype = guide_legend(order = 2))
+    x_scale <- scale_x_continuous(breaks = c(46, seq(50,100,10), 106), 
+                                  labels = c("46th \n\n (1879-1881)", seq(50,100,10), "106th \n\n (1999-2001)"))
+    rects1 <- annotate("rect", xmin=xmin, xmax=xmax, ymin=-0.175, ymax=-0.125, 
+                       fill = c("black","gray25","black","gray25"))
+    rects2 <- annotate("rect", xmin=xmin[c(2,4)], xmax=xmax[c(2,4)], ymin=-0.130, ymax=-0.125, fill = "purple3")
+    txts1 <- annotate("text", x = (xmin + xmax)/2, y = -0.1375,
+                      label = landmark_names[,1], size = 3.5, color = "gray75")
+    txts2 <- annotate("text", x = (xmin + xmax)/2, y = -0.16,
+                      label = landmark_names[,2], size = 3.5, color = "gray75")
+    g <- ggplot(df, aes(x = Congress, y = Bias, ymin = LB, ymax = UB))
+    graph <- (g + my_lty + my_clrs + x_scale + ylab("Bias toward majority") +
+                geom_segment(aes(linetype=""), x=xmin[2], xend=xmax[2], y=-.1725, yend=-0.1725, size=1, color="purple3") +
+                rects1 + rects2 + txts1 + txts2 +
+                geom_hline(yintercept = 0, color = "darkgray") +
+                geom_linerange(aes(color = Majority), size = 1.75, alpha = 0.5) +
+                geom_line(color = "black") +
+                geom_point(color = "black", size = 1.5) +
+                my_guides
+    )
+    if (!legend) graph <- graph + theme(legend.position = "none")
+    return(graph)
+  }
+  df <- prepare_plot_data()
+  graph <- assemble_graph(df)
+  return(graph)
+}
+
+plot_theta_vs_p <- function(theta, data) {
+  theta_vs_p <- data.frame(Congress = data$congress, demmaj = data$demmaj, p = data$majps/data$nvotes, theta = theta)
+  theta_vs_p <- ddply(theta_vs_p, "Congress", summarise, Majority = mean(demmaj), p = mean(p), theta = mean(theta))
+  theta_vs_p$Majority <- factor(theta_vs_p$Majority, labels = c("Republican","Democrat"))
+  mylabs <- labs(y = "Estimated", x = "Observed" )
+  myclrs <- scale_color_manual(values = c("red","blue"), name = "Majority Party")
+  mynote <- annotate("text", x = 0.875, y = 0.675, size = 3.0, label = "Each point represents a congress", fontface = "bold")
+  residnote <- annotate("text", x = 0.325, y = 0.025, size = 3.5, label = "Residuals", fontface = "bold", color = "white")
+  pos <- with(theta_vs_p, p - theta > 0)
+  rect <- annotate("rect", ymin = -Inf, ymax = 0.15, xmin = -Inf, xmax = Inf, fill = "gray20", alpha = 0.5)
+  y_scale <- scale_y_continuous(breaks = c(-0.05, 0, 0.05, 0.25, 0.5, 0.75))
+  graph <- ggplot(theta_vs_p, aes(x = p, y = theta, color = Majority)) 
+  graph <- (graph + mylabs + myclrs + y_scale + mynote + rect + residnote +
+              geom_hline(yintercept = 0, color = "black", size = 0.35) +
+              geom_linerange(aes(ymin = 0, y = p-theta, ymax = p-theta)) +
+              geom_abline(intercept = 0, slope = 1, lty = 2) +
+              geom_point(size = 2.5)
+  )
+  return(graph)
+}
+
+get_post_probs <- function(stanfit, C, X) {
+  stopifnot(length(X) == length(C))
+  post_means <- apply(get_posterior_mean(stanfit), 1, mean)
+  compute_post_prob <- function(i) {
+    b_bias <- post_means[paste0("b_bias[",C[i],"]")]
+    b_resp <- post_means[paste0("b_resp[",C[i],"]")]
+#     phi <- post_means[paste0("phi[",C[i],"]")]
+    theta <- b_bias + b_resp*X[i]
+    theta <- 1/(1 + exp(-theta))
+    return(theta)
+  }
+  out <- sapply(1:length(X), compute_post_prob)
+  return(out)
+}
+
+display_plots <- function(labs, graph1, graph2) {
+  gr_ttl <- textGrob(labs["title"], gp = gpar(fontface="bold.italic", fontsize=17))
+  gr_sub1 <- textGrob(labs$subs[1], gp = gpar(fontface="bold.italic", fontsize=14,lineheight=1))  
+  gr_sub2 <- textGrob(labs$subs[2], gp = gpar(fontsize=13))
+  gr_sub3 <- textGrob(labs$subs[3], gp = gpar(fontface="bold.italic", fontsize=14,lineheight=1))  
+  gr_sub4 <- textGrob(labs$subs[4], gp = gpar(fontsize=13))
+  space <- textGrob(" ")
+  image <- arrangeGrob(gr_sub1,gr_sub2, graph1, space, gr_sub3, gr_sub4, graph2, 
+                       ncol=1, nrow=7, heights = c(1,.5,10,2,1,.5,10))
+  grid.arrange(image)
+}
+```
+
+
+```{r, echo=FALSE}
+congress <- data.frame(number = 46:106)
+congress <- mutate(congress, 
+                   start = 1878 + seq(1,122,2), 
+                   end = start + 2,
+                   pre_Reed = (end <= 1890),
+                   post_Czar = (end %in% 1890:1910),
+                   post_Cannon = (end %in% 1912:1961),
+                   post_Packing = (end %in% 1962:2001)
+)
+landmarks <- c(1890, 1910, 1961)
+ll <- length(landmarks)
+xmin <- congress$number[1]
+xmax <- congress$number[nrow(congress)]
+for(i in 1:ll){
+  xmin <- c(xmin, congress$number[which.max(which(congress$end <= landmarks[i]))])
+}
+xmax <- c(xmin[-1], xmax)
+```
+
+
+```{r, plot, echo=FALSE, message=FALSE, fig.width = 10.5, fig.height = 10.5}
+# Make the plots
+bias_posterior <- extract(stanfit, pars = "bias")[[1]]
+theta_posterior <- get_post_probs(stanfit, C = (rollcall_data$congress - 45), X = rollcall_data$lnmajvavg)
+landmark_names <- cbind(c("pre-", rep("post-",3)), c("Reed", "Czar", "Cannon", "Packing"))
+ttl <- c("\n Roll Calls in the US House of Representatives, 46th - 106th Congresses \n")
+subs <- c("Estimated bias toward the majority party \n", "Posterior means and 95% credible intervals",
+          "Majority party victories \n", "Observed vs. estimated proportions")
+
+labs <- list(title = ttl, subs = subs)
+graph1 <- plot_bias(bias_posterior, congress_data, cred_lev = 0.95, legend = T)
+graph2 <- plot_theta_vs_p(theta_posterior, rollcall_data)
+display_plots(labs, graph1, graph2)
+```
+
+
+
+
+
+

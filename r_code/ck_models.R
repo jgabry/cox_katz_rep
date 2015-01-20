@@ -2,7 +2,8 @@ source("ck_pp_check.R")
 source("WAIC.R")
 library(rstan)
 library(foreign)
-data <- read.dta("cox_katz_replication/data/subgroup-roll-call4606.dta")
+load("data/ck_data.RData")
+data <- ck_data
 
 load("stan_tests/01_20_2015/ck_01_20_2015.RData")
 
