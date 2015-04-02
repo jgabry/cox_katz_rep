@@ -1,4 +1,4 @@
-# same as ck_cholesky but only GMRF prior on bias (not responsiveness)
+# same as ck_cholesky but with global intercept
 
 functions {
   /** 
@@ -24,17 +24,22 @@ functions {
       noise ~ normal(0,1) ;
       return location + scale * noise ;
     }
-    
+  
   /** 
-  * Transform vector of standard normals to vector of normal(location, scale).
+  * Transform vector of standard normals to vector of Cauchys 
+  * with same location and scale.
   *
-  * @param location Location parameter for normal distribution
-  * @param scale Scale parameter for normal distribution
-  * @param noise Standard normal variable (as declared in parameters block)
+  * @param location Location parameter for Cauchy distribution
+  * @param scale Scale parameter for Cauchy distribution
+  * @param noise Vector of standard normals (as declared in parameters block)
   */
-    vector normal_trans_vec_lp(real location, real scale, vector noise) {
+    vector cauchy_trans_vec1_lp(real location, real scale, vector noise) {
+      vector[num_elements(noise)] out ;
       noise ~ normal(0,1) ;
-      return location + scale * noise ;
+      for (j in 1:num_elements(out)) {
+        out[j] <- location + scale * tan(pi() * (Phi_approx(noise[j]) - 0.5)) ;
+      }
+      return out ;
     }
   
 }
@@ -58,35 +63,38 @@ transformed data {
   OMEGA <- cholesky_decompose(SIGMA) ;
 }
 parameters {
-  vector[C]             bias_noise;
-  real                  resp_noise;
+  real                  Const ; # global intercept
+  vector[C]             noise[2] ;
   real<lower=0>         tau_b_noise ;
+  real<lower=0>         tau_r_noise ;
   real<lower=0>         phi ;
-  # real                  Const_noise ;
 }
 transformed parameters {
   vector[C]             b_bias ;
-  real                  b_resp ;
+  vector[C]             b_resp ;
   real<lower=0>         tau_b ;
-  #  real                  Const ;
-  
-  # Const <- normal_trans_lp(0, 5, Const_noise) ;
+  real<lower=0>         tau_r ;
+
   tau_b <- cauchy_trans_lp(0, 2.5, tau_b_noise) ;
-  b_resp <- normal_trans_lp(0, 2.5, resp_noise) ;
-  b_bias  <- (tau_b * OMEGA) * bias_noise ;
+  tau_r <- cauchy_trans_lp(0, 2.5, tau_r_noise) ;
+  
+  b_bias  <- (tau_b * OMEGA) * noise[1] ;
+  b_resp  <- (tau_r * OMEGA) * noise[2] ;
 }
 model {
   // local variables
   vector<lower=0>[N]  alphas ;   
   vector<lower=0>[N]  betas ;    
   
-  bias_noise ~ normal(0,1) ;
+  for (i in 1:size(noise)) 
+    noise[i] ~ normal(0,1) ;
+  
   phi ~ gamma(0.0001, 0.0001) ;
   
   // likelihood
   for (n in 1:N) {
     real theta_n ;
-    theta_n <- inv_logit(b_bias[congress[n]] + b_resp*lnmajvavg[n]) ;    
+    theta_n <- inv_logit(Const + b_bias[congress[n]] + b_resp[congress[n]]*lnmajvavg[n]) ;    
     alphas[n] <- theta_n * phi ;
     betas[n]  <- (1 - theta_n) * phi ;
   }
@@ -102,16 +110,15 @@ generated quantities {
     bias[c] <- inv_logit(b_bias[c]) - 0.5 ;
   
   for (n in 1:N) {
+    real theta_n ;
     real alpha_n ;
     real beta_n ;
-    alpha_n <- phi * inv_logit(b_bias[congress[n]] + b_resp*lnmajvavg[n]) ;
-    beta_n  <- phi * (1 - inv_logit(b_bias[congress[n]] + b_resp*lnmajvavg[n])) ;
+    theta_n <- inv_logit(Const + b_bias[congress[n]] + b_resp[congress[n]]*lnmajvavg[n]) ;
+    alpha_n <- phi * theta_n ;
+    beta_n  <- phi * (1 - theta_n) ;
     log_lik[n] <- beta_binomial_log(majps[n], nvotes[n], alpha_n, beta_n) ;
     y_rep[n] <- beta_binomial_rng(nvotes[n], alpha_n, beta_n) ;
   }
   
 }
-
-
-
 

@@ -70,21 +70,24 @@ stan_data <- list(N = N,
                   lnmajvavg = data$lnmajvavg)
 
 
-fit_compile <- stan(file = "final_models/ck_cholesky2.stan", 
+fit_compile <- stan(file = "final_models/ck_cholesky3.stan", 
                     data = stan_data, chains = 1, iter = 10)
+
 
 
 pars <- fit_compile@model_pars[-grep("noise", fit_compile@model_pars)]
 
-
-ck_cholesky2 <- stan(fit = fit_compile, 
+ck_cholesky3 <- stan(fit = fit_compile, 
                     data = stan_data, 
                     iter = 500, 
                     chains = 6,
                     pars = pars,
                     refresh = 10)
 
-save(ck_cholesky2, file = "final_models/ck_cholesky2.RData", compress = "xz")
+save(ck_cholesky3, file = "final_models/ck_cholesky3.RData", compress = "xz")
 
 
+majps <- data$majps
+library(shinyStan)
+launch_shinystan(ck_cholesky)
 
