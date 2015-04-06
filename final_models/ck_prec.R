@@ -1,8 +1,8 @@
 library(rstan)
 library(foreign)
-# data <- read.dta("cox_katz_replication/data/subgroup-roll-call4606.dta")
 
 # Load data
+# data <- read.dta("cox_katz_replication/data/subgroup-roll-call4606.dta")
 data <- read.dta("subgroup-roll-call4606.dta")
 
 period <- with(data, congress - 45)
@@ -62,33 +62,30 @@ A <- make_A_matrix(dim = C, type = "rw1")
 # Degree matrix
 D <- diag(rowSums(A))
 
-# Penalty matrix and its inverse
-P <- D - 0.99*A
-P_inv <- solve(P)
-
 stan_data <- list(N = N,
                   C = C,
-                  SIGMA = P_inv,
+                  A = A,
+                  D = D,
                   congress = period,
                   nvotes = data$nvotes, 
                   majps = data$majps, 
                   lnmajvavg = data$lnmajvavg)
 
 
-fit_compile <- stan(file = "final_models/ck_cholesky3.stan", 
+fit_compile <- stan(file = "final_models/ck_prec.stan", 
                     data = stan_data, chains = 1, iter = 10)
 
 
-save_pars <- fit_compile@model_pars[-grep("noise", fit_compile@model_pars)]
+# save_pars <- fit_compile@model_pars[-grep("noise", fit_compile@model_pars)]
 
-ck_cholesky3 <- stan(fit = fit_compile, 
-                    data = stan_data, 
-                    iter = 500, 
-                    chains = 6,
-                    pars = save_pars,
-                    refresh = 10)
+ck_prec <- stan(fit = fit_compile, 
+                data = stan_data, 
+                iter = 500, 
+                chains = 6,
+                # pars = save_pars,
+                refresh = 10)
 
-save(ck_cholesky3, file = "final_models/ck_cholesky3.RData", compress = "xz")
+save(ck_prec, file = "final_models/ck_prec.RData", compress = "xz")
 
 
 majps <- data$majps

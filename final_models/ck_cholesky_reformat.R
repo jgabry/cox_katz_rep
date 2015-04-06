@@ -64,31 +64,31 @@ D <- diag(rowSums(A))
 
 # Penalty matrix and its inverse
 P <- D - 0.99*A
-P_inv <- solve(P)
+Pinverse <- solve(P)
 
 stan_data <- list(N = N,
                   C = C,
-                  SIGMA = P_inv,
-                  congress = period,
-                  nvotes = data$nvotes, 
-                  majps = data$majps, 
-                  lnmajvavg = data$lnmajvavg)
+                  Pinverse = Pinverse,
+                  cong = period,
+                  nVotes = data$nvotes, 
+                  nWins = data$majps, 
+                  vRatio = data$lnmajvavg)
 
 
-fit_compile <- stan(file = "final_models/ck_cholesky3.stan", 
+fit_compile <- stan(file = "final_models/ck_cholesky_reformat.stan", 
                     data = stan_data, chains = 1, iter = 10)
-
 
 save_pars <- fit_compile@model_pars[-grep("noise", fit_compile@model_pars)]
 
-ck_cholesky3 <- stan(fit = fit_compile, 
-                    data = stan_data, 
-                    iter = 500, 
-                    chains = 6,
-                    pars = save_pars,
-                    refresh = 10)
+ck_cholesky_reformat <- stan(fit = fit_compile, 
+                     data = stan_data, 
+                     iter = 500, 
+                     chains = 6,
+                     pars = save_pars,
+                     refresh = 10)
 
-save(ck_cholesky3, file = "final_models/ck_cholesky3.RData", compress = "xz")
+
+save(ck_cholesky_reformat, file = "final_models/ck_cholesky_reformat.RData", compress = "xz")
 
 
 majps <- data$majps
